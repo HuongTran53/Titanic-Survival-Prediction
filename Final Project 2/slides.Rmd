@@ -1,0 +1,327 @@
+---
+title: "Titanic Dataset with survival prediction"
+author: "Huong Tran"
+date: "11/26/2021"
+fontsize: 10pt
+output:
+  beamer_presentation:
+    theme: "Warsaw"
+    colortheme: "default"
+    fonttheme: "structurebold"
+    
+---
+```{r setup, echo = F, warning= F, message=FALSE}
+knitr::opts_chunk$set(warning = F, message = F)
+```
+
+## Objective:
+- The RMS Titanic was a British passenger liner that sank in the North Atlantic Ocean in the early morning hours of 15 April 1912, after it collided with an iceberg during its maiden voyage from Southampton to New York City. 
+
+- There were an estimated 2,224 passengers and crew aboard the ship, and more than 1,500 died, making it one of the deadliest commercial peacetime maritime disasters in modern history.
+
+- This project is a competition on Kaggle with target of predicting which passengers survived the Titanic shipwreck by machine learning.
+
+## Overview about our data:
+![Train dataset](/Users/huongtran/OU /Course Work/SES 4/STA5224/Final Project 2/figure/train.png)
+
+
+
+## Overview about our data: 
+\begin{figure}
+\includegraphics[clip, trim=0.3cm 4cm 0.1cm 4cm, width=1.00\textwidth]{mysummary.pdf}
+\caption{Missing value in train and test data set}
+\end{figure}
+
+
+## EDA: 
+\framesubtitle{Some insights about variable \textit{Name}}
+- \textit{Name} does not contain any missing and  have 891 unique values.
+- Contain information about title of person, which indicates their social class and profession.
+- Extract \textit{Title} from \textit{Name} and combine it into train set.  
+
+```{r, echo = F, warning = F, message = F}
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(ggplot2)
+library(gmodels)
+library(vcd)
+library(caret)
+library(xtable)
+library(kableExtra)
+train.org <- read.csv2(
+  "/Users/huongtran/OU /Course Work/SES 4/STA5224/Final Project 2/data/train.csv", 
+  header = T, sep = ",")
+```
+
+
+```{r}
+head(train.org$Name, 3)
+```
+
+
+
+
+## EDA
+\framesubtitle{Some insights about variable \textit{Name}}
+\begin{figure}
+\includegraphics[clip, trim=0.5cm 4.5cm 0.5cm 3cm, width=1.00\textwidth]{/Users/huongtran/OU /Course Work/SES 4/STA5224/Final Project 2/figure/t.pdf}
+\caption{Unique Title}
+\end{figure}
+
+
+## EDA
+\framesubtitle{Some insights about variable \textit{Name}}
+- \textit{Title} relating to army and "Rev" are less likely to survive and they are male -> "Officer". 
+
+- \textit{Title} "Mme", "Mlle", "th", "Lady", "Ms" represent unmarried women -> "Miss". 
+
+- "Jonkheer" -> "Mr". 
+
+- The only one value of "Lady" and "Sir" are spouse ->  "Mrs" and "Mr". 
+
+## EDA
+\framesubtitle{Some insights about variable \textit{Name}}
+\begin{figure}
+\includegraphics[height=0.8\textheight, width = 0.8\textwidth]{/Users/huongtran/OU /Course Work/SES 4/STA5224/Final Project 2/figure/TitlePlot.png}
+\caption{Ratio of survival based on\textit{Title}}
+\end{figure}
+
+## EDA
+\framesubtitle{Some insights about variable \textit{Name}}
+ - Number of different levels in \textit{Title} variable to 6. 
+ 
+ - "Mr" and "Officer" has the least chance of survival.
+ 
+ - "Miss" has the highest chance of survival.
+ - this variable also contains information about \textit{Sex}.
+ 
+## EDA 
+\framesubtitle{\textit{Age}}
+- 177 missing value in train dataset, which accounts for $19.87\%$ of total observation.
+
+- 86 missing value in test dataset, which account for $20.57\%$ of total observation.
+
+## EDA
+\framesubtitle{\textit{Age}}
+\begin{figure}
+\includegraphics[height=0.6\textheight, width = 0.8\textwidth]{/Users/huongtran/OU /Course Work/SES 4/STA5224/Final Project 2/figure/AgeMissing.png}
+\caption{Passengers with missing value in Age}
+\end{figure}
+
+- Impute missing value by mean of age in social class \textit{Pclass = 3}, with \textit{Title} "Mrs", "Mr" and "Miss"
+
+## EDA
+\framesubtitle{\textit{Age}}
+\begin{figure}
+\includegraphics[height=0.8\textheight, width = 0.9\textwidth]{/Users/huongtran/OU /Course Work/SES 4/STA5224/Final Project 2/figure/AgeSurvival.png}
+\caption{Boxplot of Age, different by \textit{Pclass} and \textit{Survived} and \textit{Sex}}
+\end{figure}
+
+
+## EDA
+\framesubtitle{\textit{Age}}
+- $50\%$ of survival male in middle class was less than 10 years old.
+
+- More than 50-year-old man is the least likely to survive through the disaster. 
+
+- This suggests a way to divide age into 3 smaller groups: young, middle.age and old stored in variable \textit{Age.char}.
+
+## EDA
+\framesubtitle{\textit{Information about Family size and total Ticket price of each family}}
+- \textit{SibSp}: Number of siblings / spouses aboard the Titanic.
+
+- \textit{Parch}: of parents / children aboard the Titanic
+
+- They both contain information about family size, we can create a new variable as \textit{family.size} to obtain information about passenger's family.
+
+## EDA
+\framesubtitle{\textit{Information about Family size and total Ticket price of each family}}
+\begin{figure}
+\includegraphics[height=0.9\textheight, width = 0.9\textwidth]{/Users/huongtran/OU /Course Work/SES 4/STA5224/Final Project 2/figure/Family-Fare.png}
+\caption{\textit{Family.size} and \textit{Fare}}
+\end{figure}
+
+## EDA
+\framesubtitle{\textit{Information about Family size and total Ticket price of each family}}
+- Boxplot shows a positive trend of $\ln(\textit{Fare})$ and size of family.
+
+- To get rid of the correlation, we will find the ticket price:
+$$\text{price} = \dfrac{\text{Fare}}{\text{Family.size}} $$
+
+- Missing value in \textit{Fare} will imply tickets cost 0, which is impossible, we will impute missing value of \textit{Price} by the mean based on \textit{Pclass}. 
+
+## EDA
+\framesubtitle{\textit{ What can Ticket class and Embarkation tell us?}}
+\begin{figure}
+\includegraphics[height=0.7\textheight, width = 0.9\textwidth]{/Users/huongtran/OU /Course Work/SES 4/STA5224/Final Project 2/figure/PclassPlot.png}
+\caption{Mosaic plot of \textit{Pclass}, \textit{Sex} and \textit{Survived}}
+\end{figure}
+- Women of upper class has the highest chance of survival. 
+
+
+## EDA
+\framesubtitle{\textit{ What can Ticket class and Embarkation tell us?}}
+\begin{figure}
+\includegraphics[height=0.7\textheight, width = 0.9\textwidth]{/Users/huongtran/OU /Course Work/SES 4/STA5224/Final Project 2/figure/PclassPlot.png}
+\caption{Mosaic plot of \textit{Pclass}, \textit{Sex} and \textit{Survived}}
+\end{figure}
+- Men the the lower class the lowest chance of survival.
+
+## EDA
+\framesubtitle{\textit{ What can Ticket class tell us?}}
+\begin{figure}
+\includegraphics[height=0.6\textheight, width = 0.9\textwidth]{/Users/huongtran/OU /Course Work/SES 4/STA5224/Final Project 2/figure/PclassPlot.png}
+\caption{Mosaic plot of \textit{Pclass}, \textit{Sex} and \textit{Survived}}
+\end{figure}
+- Total number of male is double the total number of female, but male has the lower probability of survival. 
+
+## EDA
+\framesubtitle{\textit{Where did they embarked?}}
+\begin{figure}
+\includegraphics[height=0.6\textheight, width = 0.9\textwidth]{/Users/huongtran/OU /Course Work/SES 4/STA5224/Final Project 2/figure/Embarked.png}
+\caption{\textit{Embarked} and \text{Pclass}}
+\end{figure}
+- The majority of passenger used Southampton (S) to embark. 
+
+- Only lower class (Pclass == 3) used Queenstown (Q).
+
+## EDA
+\framesubtitle{\textit{Where did they embarked?}}
+- \textit{Embarked} has 2 missing values:  Mrs. George Nelson, and Miss Amelie is her maid. 
+
+- Since these missing values are from cabin B28, other variables in deck B can be used for imputation. 
+
+- Passenger with Cabin in deck B used Cherbourg (C) and Southampton (S) as their embarkation -> used either $S$ or $C$ to impute missing data.
+
+
+
+
+## Model fitting
+\framesubtitle{\textit{Variable Selection}}
+- Split \textit{train} data into: \textit{train.mod} and \textit{valid.mod}.
+
+- Number of observation in train.mod is:  713 
+
+- Number of observation in test.mod is:  178
+
+## Model fitting
+\framesubtitle{\textit{Variable Selection}}
+- Forward and Backward selection suggests: \textit{Title, Pclass, family.size, Age, Fare, price, Sex} as predictors. 
+
+- This model produced the AIC of 614.4. 
+
+- No need to use \textit{Sex} variable as predictors. 
+
+- Drop \textit{Fare} to avoid the collinearity with \textit{family.size}. 
+
+- In conclusion, our model will use \textit{Title, Pclass, family.size, Age, price}.
+
+## Model fitting
+\framesubtitle{\textit{Logistic Regression}}
+- Using cut point:
+$$\hat{p} = \dfrac{\text{Total number of survival} }{\text{Total number of observation}}  $$
+- Logistic Regression model provide AIC of 614.87 and the fitted accuracy is 82.04$\%$. 
+
+
+## Model fitting
+\framesubtitle{\textit{Logistic Regression}}
+\begin{figure}
+\includegraphics[height=0.7\textheight, width = 0.9\textwidth]{/Users/huongtran/OU /Course Work/SES 4/STA5224/Final Project 2/figure/ROC-curve.png}
+\caption{ROC curve of Logistic Regression}
+\end{figure}
+
+- AUC is 0.8696. 
+
+## Model fitting
+\framesubtitle{\textit{Logistic Regression}}
+- Since the choice of cut point is arbitrary, the result are sensitive to relative numbers of times that $y = 1$ and $y = 0$.
+
+- Also, it collapses continuous predictive value $\hat{p}$ into binary ones. 
+
+- For example, predictive value of 0.37999 will result 0, which is not very convincible. 
+
+## Model fitting
+\framesubtitle{\textit{Decision Tree}}
+- Decision Tree is a supervised learning method, which uses a graph to represent choices and their results in a form of a tree. 
+
+\begin{figure}
+\includegraphics[height=0.8\textheight, width = 0.9\textwidth]{/Users/huongtran/OU /Course Work/SES 4/STA5224/Final Project 2/figure/tree.png}
+\caption{Decision Tree}
+\end{figure}
+
+## Model fitting
+\framesubtitle{\textit{Decision Tree}}
+- \textit{Title} is the most important factor, if a passenger has title of "Dr", "Mr", "Officer", there is $60\%$ of chance that they could not survive. 
+- Smaller value of \text{Pclass} has higher probability of survive.
+
+- The fitted accuracy of decision tree is about  84.57$\%$, which is higher than logistic regression.
+
+## Model fitting
+\framesubtitle{\textit{Random Forest}}
+- Random forest is a supervised learning which creates several random Decision Tree and output is the aggregate of those trees. 
+
+- To get a good comparsion among all forests, we will create several forest with the same number of trees, final result is taken using the mean of result from these forests. 
+
+## Model fitting
+\framesubtitle{\textit{Decision Tree}}
+\begin{figure}
+\includegraphics[height=0.8\textheight, width = 0.9\textwidth]{/Users/huongtran/OU /Course Work/SES 4/STA5224/Final Project 2/figure/bestforest.png}
+\caption{Fitted accuracy of random forest with different number of tree}
+\end{figure}
+- Fitted accuracy increase as number of tree increase, accuracy peaks when ntree = 45, but never exceed 82$\%$ of accuracy.
+
+## Model fitting
+\framesubtitle{\textit{SVM}}
+- SVM (Support Vector Machine) is a supervised learning methods, which used to classified data.
+
+- It creates a hyperplane to separate train data into 2 classes. 
+
+- The goal is to decide which class a new data point will be in.
+
+## Model fitting
+\framesubtitle{\textit{SVM}}
+\begin{figure}
+\includegraphics[height=0.8\textheight, width = 0.9\textwidth]{/Users/huongtran/OU /Course Work/SES 4/STA5224/Final Project 2/figure/SVM_margin.png}
+\caption{SVM}
+\end{figure}
+
+
+## Model fitting
+\framesubtitle{\textit{SVM}}
+
+- Fitting train data into SVM model, we obtain the fitted accuracy is: 90$\%$, which much higher that previous methods. 
+
+
+## Model fitting
+\framesubtitle{Model Comparision}
+\begin{figure}
+\includegraphics[clip, trim=1cm 6cm 0.5cm 7cm, width=1.00\textwidth]{/Users/huongtran/OU /Course Work/SES 4/STA5224/Final Project 2/figure/r.pdf}
+\caption{Comparision of fitted and predicted accuracy between models}
+\end{figure}
+
+
+## Making prediction on \textit{test} and submit to Kaggle:
+- Cleaning test dataset with the procedure that we cleaned train dataset. 
+
+- SVM does not seem to work well in newdata, therefore we will just make prediction for test dataset, using Logistic Regression and Decision Tree. 
+
+- Kaggle returns the score not very different between the two models:
+
+  1. Logistic Regression 77.9$\%$
+  
+  2. Decision Tree: 77.4$\%$
+
+## Further question for improvement:
+1. Ridge regression is expected to give better performance when handling collinearity. 
+
+2. Regression on \textit{Age} using other variables can be applied and hopefully will bring better results. 
+
+3. \textit{Title} "Master" in the first class has more chance to survive than the lower class. Therefore, interaction of some variables should be taken into account. 
+
+## Reference:
+\begin{thebibliography}{9}
+	\bibitem{1} Categorical Data Analysis, Third Edition, Alan Agresti.
+	\bibitem{2} An introduction to Categorical Data Analysis, Third Edition, Alan Agresti.
+	\bibitem{IntroML} Machine Learning Algorithms -A Review, Batta Mahesh
+\end{thebibliography} 

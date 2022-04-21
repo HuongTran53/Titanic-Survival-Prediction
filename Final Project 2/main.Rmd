@@ -1,0 +1,440 @@
+---
+title: 'STA 5224: Final Project - Titanic Dataset'
+author: "Huong Tran"
+date: "3/10/2022"
+output:
+  pdf_document: default
+  word_document: default
+---
+
+# I. Project Proposal: 
+## Objective:
+This project will predict which kind of people are likely to survive in the disaster of Titanic. Multiple machine learning models will be taken in to account and the comparison of their performance will be derived.
+
+## About the dataset;
+The data is obtained from the Titanic competition from [Kaggle](https://www.kaggle.com/c/titanic). While the test.csv and gender_submission.csv will be used for model training, the train.csv will be used to evaluate model performance. 
+
+The dependence variable is "Survived", which has value 0 or 1, indicates that the person survived after the disaster or not. The others are exploratory variables, with their meaning can be find at the website.
+
+```{r}
+test <- read.csv2(
+  "/Users/huongtran/OU /Course Work/SES 4/STA5224/Final Project 2/data/test.csv", 
+  header = T, sep = ","
+  )
+
+survive <- read.csv(
+  "/Users/huongtran/OU /Course Work/SES 4/STA5224/Final Project 2/data/gender_submission.csv")
+
+train <- read.csv2(
+  "/Users/huongtran/OU /Course Work/SES 4/STA5224/Final Project 2/data/train.csv", 
+  header = T, sep = ","
+  )
+
+survive$Survived <- as.numeric(survive$Survived)
+train$Survived <- as.character(train$Survived)
+summary(train)
+```
+
+```{r}
+colnames(train)
+nrow(train)
+```
+```{r, include=F}
+summary(train)
+```
+
+# II. EDA (Exploratory Data Analysis):
+```{r, message= F, warning= F}
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(ggplot2)
+library(gmodels)
+library(vcd)
+```
+
+
+```{r}
+anyDuplicated(train)
+```
+There is no duplicate rows in this dataset. 
+
+```{r}
+colSums(is.na(train))
+```
+At first, it seems that there is no missing value in this dataset, but in fact, there are some cells having value of empty string, and containing no information, those are considered as missing value. 
+
+```{r}
+empty.string <- c()
+for (i in colnames(train)){
+  empty.string <- c(empty.string, sum(train[,i] == ""))
+}
+names(empty.string) <- colnames(train)
+empty.string
+```
+
+```{r}
+cat("Number of missing value in Cabin: " , empty.string["Cabin"], "\n", 
+    "They account for ",
+    round( nrow(train[which(train$Cabin == ""), ])/nrow(train) * 100, 2), 
+    "% in total observation")
+```
+
+Missing value account for $77\%$ in Cabin, therefore I will drop this variable in my dataset. 
+
+
+## 1. What about name?
+Name can represent for the passenger race and ethnic, which can affect their survival chance. All of value in column \textit{Name} are different from each other, which are not very meaningful. Therefore, I will split this column into 3 others columns: \textit{First.name, Last.name, suffix}
+ 
+```{r}
+length(unique(train$Name))
+```
+
+```{r}
+#train["First.Name"] <- str_split_fixed(train$Name, ", ", n = 3)[, 1 ]
+train["Last.Name"] <- str_split_fixed(train$Name, " ", n = 3)[, 3] 
+train["Last.Name"] <- gsub("Mr.", "", train[,"Last.Name"], fixed = T)
+train["Last.Name"] <- gsub("Mrs.", "", train[,"Last.Name"], fixed = T)
+train["Last.Name"] <- gsub("Miss.", "", train[,"Last.Name"], fixed = T)
+train["Last.Name"] <- gsub("(", "", train[,"Last.Name"], fixed = T)
+train[,"Last.Name"] <- trimws(train[,"Last.Name"], which = "left")
+train["Last.Name"] <- str_split_fixed(train$Last.Name, " ", n = 2)[,1]
+
+length(unique(train$Last.Name))
+cat("The total nunber of unique last name is: ", 
+    length(unique(train$Last.Name)), "\n ")
+
+tail(sort(unique(train$Last.Name)), 10)
+
+```
+Looking some example of unique last name, there are many last name with "William". This mean that they might contain same information about their race and ethnic. Therefore, we can merge these last name in to one groups of "William", and so are the other last names, which contain the same information.
+
+```{r, include=F}
+train["new.Last.Name"] <- c()
+for  (i in 1:nrow(train)) {
+  temp.i <- strsplit(train[i, "Last.Name"], " ")[[1]][1]
+  train[i, "new.Last.Name"] <- temp.i 
+  for(j in i:nrow(train)) {
+    temp.j <- train[j, "Last.Name"]
+    if  (grepl(temp.i, temp.j, fixed = TRUE)) {
+      train[j, "new.Last.Name"] <- temp.i
+    }
+  } 
+}
+```
+
+
+```{r}
+df.name <- as.data.frame(table(train$Survived, train$Last.Name))
+temp <- df.name[which(df.name$Freq >= 2),]
+ggplot(temp, aes(x = Var2, y = Freq, colour = Var1)) + geom_point() +
+  theme(axis.text.x = element_text(angle = 90, size = 6)) +
+  labs(title = "Number of survival based on name") +
+  xlab("Passenger Last name") +
+  ylab("Count")
+
+```
+From the plot, people with last name "Andrew", "Martin",... are likely to have more chance of surviving through the disaster. 
+
+```{r}
+# meo <- train[order(train$new.Last.Name, train$Last.Name),]
+summary(xtabs(Freq ~ Var1 + Var2, data = df.name))
+```
+The Chi-square  actually shows that last name is really helpful to predict the chance of survived. However,  there are too many levels in this categories, it is not really helpful to use "Last.name" as a prediction. In fact, besides last name, title can be meaningful, since it represents status and profession, and their are not too many categories of titles.
+
+```{r}
+train["Title"] <- str_split_fixed(train$Name, ", ", n = 2)[,2]
+train["Title"] <- str_split_fixed(train$Title, ". ", n = 2)[, 1]
+unique(train$Title)
+```
+
+There are title relating to army and "Rev" are less likely to survive, we can just merge them in one level as "Official", all of observation in this variables are male. 
+```{r}
+train[which(train$Title %in% c("Major", "Capt", "Col", "Don", "Rev")), c("Survived", "Title", "Sex")]
+```
+
+```{r}
+train["Title"] <- gsub("Major", "Official", train[,"Title"], fixed = T)
+train["Title"] <- gsub("Capt", "Official", train[,"Title"], fixed = T)
+train["Title"] <- gsub("Col", "Official", train[,"Title"], fixed = T)
+train["Title"] <- gsub("Rev", "Official", train[,"Title"], fixed = T)
+train["Title"] <- gsub("Don", "Official", train[,"Title"], fixed = T)
+unique(train$Title)
+```
+
+
+```{r}
+train[which(train$Title %in% c("Mme", "Mlle", "th", "Jonkheer", "Lady", "Sir")), c("Title","Pclass", "Sex", "Age", "Name", "SibSp", "Survived")]
+```
+ 
+For the title listed above, the all represent for unmarried women, therefore, we should change them into "Miss. And "Jonkheer" will be changed into "Mr". Also the only one value of "Lady" and "Sir" are spouse, we will change their title into "Mrs" and "Mr". 
+```{r}
+train["Title"] <- gsub("Mme", "Miss", train[,"Title"], fixed = T)
+train["Title"] <- gsub("Mlle", "Miss", train[,"Title"], fixed = T)
+train["Title"] <- gsub("th", "Miss", train[,"Title"], fixed = T)
+train["Title"] <- gsub("Jonkheer", "Mr", train[,"Title"], fixed = T)
+train["Title"] <- gsub("Ms", "Miss", train[,"Title"], fixed = T)
+train["Title"] <- gsub("Ms", "Miss", train[,"Title"], fixed = T)
+train["Title"] <- gsub("Ms", "Mrs", train[,"Title"], fixed = T)
+train["Title"] <- gsub("Lady", "Mrs", train[,"Title"], fixed = T)
+train["Title"] <- gsub("Sir", "Mr", train[,"Title"], fixed = T)
+
+unique(train$Title)
+```
+
+
+```{r}
+df.title <- as.data.frame(table(train$Survived, train$Title))
+names(df.title)
+ggplot(df.title, aes(x = Var2, y = Freq, fill = Var1)) + geom_col(position = "fill") 
+```
+
+"Miss" and "Mrs" had the highest chance to survived, while "Official" and "Mr" are the two groups with lowest chance to survive.
+
+Also, the information of sex is included in title, there is no need to use the variable sex.
+
+## 2. What can we Ticket class tell us?
+At first, we will look at the relation of Ticket class (\textit{Pclass}) and Passenger fare (\textit{fare}):
+```{r}
+train$Fare <- as.numeric(train$Fare)
+train["Pclass.char"] <- as.character(train$Pclass)
+ggplot(train, aes(Pclass.char, Fare)) + geom_boxplot()
+```
+Obviously, there is a significant positive correlation of the two variables, the upper class giving the most fare while the lower class giving the least fare. 
+
+```{r, include = F}
+train["Pclass.char"] <- as.character(train$Pclass)
+CrossTable(train$Survived, train$Pclass, prop.r = F, prop.t = F, prop.c = F,
+           sresid = F, asresid = T, format =  "SPSS")
+```
+
+Keep that in mind, we continue with the difference in their sex: 
+```{r, include= F}
+PclassGap <- xtabs(~ Survived + Pclass, data = train)
+stdres <- chisq.test(PclassGap)$stdres
+mosaic(PclassGap, gp = shading_Friendly, residuals = stdres, residuals_type ="Std\nresiduals", labeling = labeling_residuals())
+mosaic(PclassGap, gp = shading_Friendly)
+```
+
+
+```{r}
+mosaic(~ Sex + Pclass + Survived, data = train,  main = "Survival on Titanic",
+       gp = shading_Friendly, legend= T )
+```
+The mosaic plots shows that a women of upper class has the highest chance of survival while a men the the Lower class the lowest chance of survival. Also, although the total number of male is three times the total number of female, but male has the lower probability of survival. In fact, when the disaster hit, women and children were the first priority  to go to the rescue  boat. 
+
+## 3. Where did they embark?
+
+```{r}
+ggplot(train, aes(Survived, Pclass, colour = Embarked)) + geom_jitter() +
+  labs(title = "Relation of Passerger class and Port of Embarktionin their survial chance")
+```
+
+The majority of passenger used  Southampton (S) to embark. However, Queenstown (\textit{Q}) was used by the lower class (\textit{Pclass = 3}).
+
+The two red dots are empty strings, that is why R could not detect any missing value. It turns out their personal information is different, but the others are the same. In fact, this cabin belongs to Mrs. George Nelson, and Miss Amelie is her maid. 
+```{r}
+train[which(train$Embarked == ""),]
+```
+Since these missing values are from cabin \textit{B28}, let see other variables in deck B:
+```{r}
+B <- train[grep("B", train$Cabin),]
+CrossTable(B$Survived, B$Embarked, prop.c = T, prop.r = F, prop.t = F, prop.chisq = F)
+```
+In general, passenger with Cabin in deck B used Cherbourg (\textit{C}) and Southampton (\textit{S}) as their embarkation.  The percentage of survival of port Cherbourg (\textit{C}) is higher, therefore, we can impute the missing data above by \textit{C}.
+
+```{r}
+train$Embarked[train$Embarked == ""] <- "C"
+train[c(62, 830),]
+```
+
+
+```{r}
+table.embarked <- with(train, table(Survived, Embarked))
+barplot(table.embarked, beside = T, legend= T, col = c("Lightblue", "blue"))
+```
+
+Only at port Cherbourge (\textit{C}), the percentage of survival is higher. 
+
+## 5. Age:
+```{r}
+train[,"Age"] <- as.numeric(train[,"Age"])
+cat("The number of missing value in variable Age: ",
+   empty.string["Age"])
+
+test[,"Age"] <- as.numeric(test[, "Age"])
+length(test[is.na(test$Age), "Age"])
+
+```
+
+
+
+```{r}
+age.missing <- train[is.na(train$Age), ]
+ggplot(age.missing, aes(Title, Pclass.char)) + geom_jitter()
+```
+
+```{r}
+ggplot(train, aes(Title, log(Age))) + geom_boxplot()
+```
+
+
+Those missing value are mainly are Mr. and Miss, therefore, we can impute the missing data by mean of age of men. 
+```{r}
+m <- mean(train[, "Age"], na.rm =  T)
+train$Age <- replace_na(train$Age, m)
+```
+
+
+
+```{r}
+#age <- train[which(train$Age != ""),]
+ggplot(train, aes(Pclass.char, Age, fill = Sex)) + geom_boxplot() + facet_grid(cols = vars(Survived))
+```
+
+Surprisingly, $50\%$ of survival male in middle class was less than 10 years old. Also, more than 50-year-old man is the least likely to survive through the disaster. This suggests a way to divide age into 3 smaller groups:
+```{r}
+train <- train %>% mutate(Age.char = case_when(Age < 15 ~ "young", 
+                              Age < 50 ~ "middle.age",
+                              Age < 100 ~ "old"))
+ggplot(train, aes(Pclass, Age.char, colour = Survived)) + geom_jitter()
+```
+
+People in the first class has the highest chance to survive, especially when they are in middle age group. In contrast, middle-age men is the most likely died in the disaster. And in fact, the young iin seccond group will survive. 
+
+## Family size:
+At first, both variable \textit{SibSp} and \textit{Parch} contain information about family size, we can create a new variable as \textit{family.size} to obtain information about passenger's family
+```{r}
+train <- train %>% mutate(family.size = SibSp + Parch  +  1 )
+table.sib <- with(train, table(Survived, family.size))
+barplot(table.sib, beside = T, legend = T, col = c("Lightblue", "Blue"))
+
+```
+Surprisingly, the number of survival in family size from 2 to 4 is higher.
+
+```{r}
+ggplot(train, aes(as.character(family.size), log(Fare))) + geom_boxplot()
+```
+There is positive trend of $\ln(\text{Fare})$ and size of family, i.e, the large family size the more fare that ticket they paid. Possibly, it was because the Fare was given the same for all member in a family, not individually different.  Remember, when we discuss about missing value of Cabin B28, the two people there had the same fare value. Let's check this logic:
+
+```{r}
+fare <- train[which(train$family.size == 2), 
+              c("Ticket", "Fare", "family.size", 
+                "Pclass","Name", "Cabin")] %>% arrange(Ticket)
+head(fare)
+```
+It seems that family members had the same ticket number would have the the same Fare. Now, we will write a function to check how correct this assumption is:
+
+
+```{r}
+train <- train %>% group_by(Ticket) %>% add_count() %>% mutate(mean.fare = mean(Fare))
+nrow(train[which(train$Fare != train$mean.fare),])
+```
+
+
+As we expected, there are only 2 cases that does  not agree with our assumption. Therefore, it is actually a correlation between the family size and fare. To get rid of it, I will find the price that each person has to pay for their ticket and also fill 0 in price by the mean based on their class. 
+
+```{r}
+train <- train %>% mutate(price = Fare / n )
+for (i in 1:3){
+  m <- mean(train[which(train$Pclass == i & train$price != 0), "price"]$price)
+  train[which(train$Pclass == i & train$price == 0), "price"] <- m
+}
+
+ggplot(train, aes(as.character(family.size), price)) + geom_boxplot()
+```
+
+Until this point, there is no dependence of ticket fare or price. But the variable "price" is actually dependent on \textit{Pclass}, and this happens in practice when you have to pay more to get the best service. 
+
+# Model Preparation:
+
+```{r}
+keep <- c("Survived", "Age", "price", "Embarked", "family.size", "Title")
+
+train.model <- train[, keep]
+train$Survived <- as.numeric(train$Survived)
+summary(train)
+names(train)
+```
+
+The same way of data cleaning for test set:
+```{r}
+# Title feature:
+
+test["Title"] <- str_split_fixed(test$Name, ", ", n = 2)[,2]
+test["Title"] <- str_split_fixed(test$Title, ". ", n = 2)[, 1]
+test["Title"] <- gsub("Major", "Official", test[,"Title"], fixed = T)
+test["Title"] <- gsub("Capt", "Official", test[,"Title"], fixed = T)
+test["Title"] <- gsub("Col", "Official", test[,"Title"], fixed = T)
+test["Title"] <- gsub("Rev", "Official", test[,"Title"], fixed = T)
+test["Title"] <- gsub("Don", "Official", test[,"Title"], fixed = T)
+test["Title"] <- gsub("Mme", "Miss", test[,"Title"], fixed = T)
+test["Title"] <- gsub("Mlle", "Miss", test[,"Title"], fixed = T)
+test["Title"] <- gsub("th", "Miss", test[,"Title"], fixed = T)
+test["Title"] <- gsub("Jonkheer", "Mr", test[,"Title"], fixed = T)
+test["Title"] <- gsub("Ms", "Miss", test[,"Title"], fixed = T)
+test["Title"] <- gsub("Ms", "Miss", test[,"Title"], fixed = T)
+test["Title"] <- gsub("Ms", "Mrs", test[,"Title"], fixed = T)
+test["Title"] <- gsub("Lady", "Mrs", test[,"Title"], fixed = T)
+test["Title"] <- gsub("Sir", "Mr", test[,"Title"], fixed = T)
+unique(test$Title)
+#This title is only in test set:
+test["Title"] <- gsub("Officiala", "Official", test[,"Title"], fixed = T)
+unique(test$Title)
+
+test$Pclass <- as.factor(test$Pclass)
+test$Fare <- as.numeric(test$Fare)
+test$Age <- as.numeric(test$Age)
+
+#age.missing.test <- test[is.na(test$Age), ] 
+#ggplot(age.missing.test, aes(Pclass, Sex)) + geom_jitter()
+#m.test <- mean(test[which(test$Pclass == 3), "Age"], na.rm =  T)
+test$Age <- replace_na(test$Age, mean(test$Age))
+
+test <- test %>% mutate(family.size = SibSp + Parch  +  1 )
+test <- test %>% group_by(Ticket) %>% add_count() %>% mutate(mean.fare = mean(Fare))
+
+test <- test %>% mutate(price = Fare / n )
+for (i in 1:3){
+  m <- mean(test[which(test$Pclass == i & test$price != 0), "price"]$price)
+  test[which(test$Pclass == i & test$price == 0), "price"] <- m
+}
+
+keep.test <- keep[-1]
+test <- test[, keep.test]
+names(test)
+```
+
+# Models:
+## 1. Logistic Model:
+```{r}
+mod.reg <- glm(Survived ~., data = train.model, family = binomial)
+summary(mod.reg)
+meo <- as.numeric(fitted(mod.reg) >  0.4)
+fit.tab <- xtabs(~ train$Survived + meo)
+reg.correct.fit  <- (fit.tab[1,1] + fit.tab[2,2]) / sum(fit.tab)
+reg.correct.fit
+
+reg <-  as.numeric(predict(mod.reg, test) > 0.4)
+
+reg.tab <- xtabs(~ survive$Survived + reg)
+reg.correct  <- (reg.tab[1,1] + reg.tab[2,2]) / sum(reg.tab)
+cat("Logistic Regestion predict ", reg.correct *100, "% of correct case" )
+```
+
+
+
+# 2. Classification:
+```{r}
+
+```
+
+
+
+## Losgistic regression:
+
+## Classification:
+
+## Model Esampling: 
+
+## Comparsions:

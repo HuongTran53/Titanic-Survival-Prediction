@@ -1,0 +1,435 @@
+---
+title: 'STA 5224: Final Project - Titanic Dataset'
+output: pdf_document
+---
+
+# I. EDA: 
+## 1.1 Overview about the data set: 
+```{r, message= F, warning= F, echo= F}
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(ggplot2)
+library(gmodels)
+library(vcd)
+library(caret)
+library(xtable)
+library(kableExtra)
+```
+
+```{r, echo=FALSE}
+test.org <- read.csv2(
+  "/Users/huongtran/OU /Course Work/SES 4/STA5224/Final Project 2/data/test.csv", 
+  header = T, sep = ",")
+#survive <- read.csv(
+#  "/Users/huongtran/OU /Course Work/SES 4/STA5224/Final Project 2/data/gender_submission.csv")
+train.org <- read.csv2(
+  "/Users/huongtran/OU /Course Work/SES 4/STA5224/Final Project 2/data/train.csv", 
+  header = T, sep = ",")
+```
+
+![Train dataset](/Users/huongtran/OU /Course Work/SES 4/STA5224/Final Project 2/figure/train.png)
+
+Titanic dataset includes 11 features as predictors, which helps predict wheather a person would survived through the Titanic disaster. 
+
+```{r, echo = F}
+cat("Number of observations: ", nrow(train.org), "\n ",
+    "Number of duplicated row: ", anyDuplicated(train.org), "\n ")
+```
+
+At first, it seems that there is no missing value in this dataset, but in fact, there are some cells having value of empty string, and containing no information, those are considered as missing value. 
+
+```{r, echo = F}
+Empty.train <- c()
+Empty.test  <- c()
+for (i in colnames(train.org)[-2]){
+  Empty.train <- c(Empty.train, sum(train.org[,i] == ""))
+  Empty.test <- c(Empty.test, sum(test.org[,i] == ""))
+  
+}
+
+mysummary <- data.frame(NA.train = colSums(is.na(train.org[, - 2])), Empty.train) %>%
+  mutate(Percent.train = round( (NA.train + Empty.train) / nrow(train.org)*100, 2)) %>%
+  cbind(data.frame(NA.test = colSums(is.na(test.org)), Empty.test = Empty.test)) %>% 
+  mutate(Percent.test = round( (NA.test + Empty.test) / nrow(test.org)*100, 2))
+  
+kable(mysummary)
+```
+
+Cabin variables has  $77\%$ missing value in train set and  $78.23\%$ in test set, therefore I will drop this variable after exploration. 
+
+```{r, echo = F}
+train <- train.org
+```
+
+
+## 1.2 Some insights about the name?
+In the variable "name", there is also title of the person, which indicates their social class and profession.
+
+```{r, echo= F}
+train["Title"] <- str_split_fixed(train$Name, ", ", n = 2)[,2]
+train["Title"] <- str_split_fixed(train$Title, ". ", n = 2)[, 1]
+cat("Number of unique title is: ", length(unique(train$Title)))
+```
+
+```{r, echo = F}
+train[which(train$Title %in% c("Major", "Capt", "Col", "Don", "Rev")), 
+      c("Survived", "Title", "Sex")]
+```
+The titles relating to army and "Rev" are less likely to survive and they are male, to increase the degreee of freedom for error term, we can merge this title as "Official" level. 
+
+```{r, echo= F}
+train["Title"] <- gsub("Major", "Officer", train[,"Title"], fixed = T)
+train["Title"] <- gsub("Capt", "Officer", train[,"Title"], fixed = T)
+train["Title"] <- gsub("Col", "Officer", train[,"Title"], fixed = T)
+train["Title"] <- gsub("Rev", "Officer", train[,"Title"], fixed = T)
+train["Title"] <- gsub("Don", "Officer", train[,"Title"], fixed = T)
+
+```
+
+
+```{r, include= FALSE}
+train[which(train$Title %in% c("Mme", "Mlle", "th", "Jonkheer", "Lady", "Sir")),
+      c("Title","Pclass", "Sex", "Age", "Name", "SibSp", "Survived")]
+```
+
+For the title listed above, they all represent for unmarried women, therefore, we should change them into "Miss. And "Jonkheer" will be changed into "Mr". Also the only one value of "Lady" and "Sir" are spouse, we will change their title into "Mrs" and "Mr". 
+```{r, echo=FALSE}
+train["Title"] <- gsub("Mme", "Miss", train[,"Title"], fixed = T)
+train["Title"] <- gsub("Mlle", "Miss", train[,"Title"], fixed = T)
+train["Title"] <- gsub("th", "Miss", train[,"Title"], fixed = T)
+train["Title"] <- gsub("Jonkheer", "Mr", train[,"Title"], fixed = T)
+train["Title"] <- gsub("Ms", "Miss", train[,"Title"], fixed = T)
+train["Title"] <- gsub("Ms", "Miss", train[,"Title"], fixed = T)
+train["Title"] <- gsub("Ms", "Mrs", train[,"Title"], fixed = T)
+train["Title"] <- gsub("Lady", "Mrs", train[,"Title"], fixed = T)
+train["Title"] <- gsub("Sir", "Mr", train[,"Title"], fixed = T)
+cat("Unique Title are: ", unique(train$Title))
+
+```
+
+After cleaning and merging "Title" variable, there are only 6 levels of this variable. In fact, those title also present passenger's sex. For example, a person with "Mr" value in "Title" should be a male. 
+
+```{r, include = F}
+df.title <- as.data.frame(table(train$Survived, train$Title))
+names(df.title)
+ggplot(df.title, aes(x = Var2, y = Freq, fill = Var1)) + geom_col(position = "fill") 
+```
+
+## 1.3 What can Ticket class tell us?
+```{r}
+mosaic(~ Sex + Pclass + Survived, data = train,  main = "Survival on Titanic",
+       gp = shading_Friendly, legend= T )
+```
+
+The mosaic plots shows that a women of upper class has the highest chance of survival while a men the the Lower class the lowest chance of survival. Also, although the total number of male is three times the total number of female, but male has the lower probability of survival. In fact, when the disaster hit, women and children were the first priority  to go to the rescue  boat. 
+
+## 1.4 Where did they embark?
+
+```{r, echo = FALSE}
+ggplot(train, aes(Survived, Pclass, colour = Embarked)) + geom_jitter() +
+  labs(title = "Relation of Passerger class and Port of Embarktionin their survial chance")
+```
+
+From the table, we know that there are 2 missing values in variable "Embarked" of the train set. The people of these two missing value have same information, but different name.  In fact, this cabin belongs to Mrs. George Nelson, and Miss Amelie is her maid. 
+```{r, include = F}
+train[which(train$Embarked == ""),]
+```
+Since these missing values are from cabin \textit{B28}, let see other variables in deck B: \textbf{ ? How can I impute the data here?}
+```{r, echo= FALSE}
+B <- train[grep("B", train$Cabin),]
+CrossTable(B$Survived, B$Embarked, prop.c = T, prop.r = F, prop.t = F, prop.chisq = F)
+```
+
+
+```{r, include= FALSE}
+train$Embarked[train$Embarked == ""] <- "C"
+train[c(62, 830),]
+```
+
+## Age:
+Recall from the table, variable "Age" has 177 missing value in train dataset, which account for $19.87\%$ of total observation. Also, in test dataset, there are 86 missing value.  
+```{r}
+train$Age <- as.integer(train$Age)
+```
+
+
+```{r, include= FALSE}
+age.missing <- train[is.na(train$Age), ]
+ggplot(age.missing, aes(Title, as.factor(Pclass))) + geom_jitter()
+```
+
+
+Those missing value are mainly are Mr. and Miss and Mrs, therefore, we can impute the missing data by mean of these group.  
+```{r, echo = F}
+m <- mean(train[which(train$Title %in% c("Mr", "Mrs", "Miss")), "Age"])
+m <- mean(train[, "Age"], na.rm =  T)
+train$Age <- replace_na(train$Age, m)
+```
+
+
+
+```{r, echo = F}
+#age <- train[which(train$Age != ""),]
+ggplot(train, aes(as.factor(Pclass), Age, fill = Sex)) + geom_boxplot() + facet_grid(cols = vars(Survived))
+```
+
+Surprisingly, $50\%$ of survival male in middle class was less than 10 years old. Also, more than 50-year-old man is the least likely to survive through the disaster. This suggests a way to divide age into 3 smaller groups: young, middle.age and old stored in variable "Age.char"
+```{r, echo = F }
+train <- train %>% mutate(Age.char = case_when(Age < 15 ~ "young", 
+                              Age < 50 ~ "middle.age",
+                              Age < 100 ~ "old"))
+# ggplot(train, aes(Pclass, Age.char, colour = as.character(Survived))) + geom_jitter()
+```
+
+People in the first class has the highest chance to survive, especially when they are in middle age group. In contrast, middle-age men is the most likely died in the disaster. And in fact, the young in second group will survive. 
+
+## Family size:
+At first, both variable \textit{SibSp} and \textit{Parch} contain information about family size, we can create a new variable as \textit{family.size} to obtain information about passenger's family.
+
+```{r, include= F}
+train <- train %>% mutate(family.size = SibSp + Parch  +  1 )
+table.sib <- with(train, table(Survived, family.size))
+barplot(table.sib, beside = T, legend = T, col = c("Lightblue", "Blue"))
+```
+Surprisingly, the number of survival in family size from 2 to 4 is higher.
+
+```{r}
+train$Fare <- as.numeric(train$Fare)
+ggplot(train, aes(as.character(family.size), log(Fare))) + geom_boxplot()
+```
+There is positive trend of $\ln(\text{Fare})$ and size of family, i.e, the large family size the more fare that ticket they paid. Possibly, it was because the Fare was given the same for all member in a family, not individually different.  Remember, when we discuss about missing value of Cabin B28, the two people there had the same fare value. Let's check this logic:
+
+```{r}
+fare <- train[which(train$family.size == 2), 
+              c("Ticket", "Fare", "family.size", 
+                "Pclass","Name", "Cabin")] %>% arrange(Ticket)
+head(fare)
+```
+It seems that family members had the same ticket number would have the the same Fare. Now, we will write a function to check how correct this assumption is:
+
+```{r, include= F}
+train <- train %>% group_by(Ticket) %>% add_count() %>% mutate(mean.fare = mean(Fare))
+nrow(train[which(train$Fare != train$mean.fare),])
+```
+
+
+As we expected, there are only 2 cases that does  not agree with our assumption. Therefore, it is actually a correlation between the family size and fare. To get rid of it, I will find the price that each person has to pay for their ticket and also fill 0 in price by the mean based on their class. 
+
+```{r, echo= FALSE}
+train <- train %>% mutate(price = Fare / n )
+for (i in 1:3){
+  m <- mean(train[which(train$Pclass == i & train$price != 0), "price"]$price)
+  train[which(train$Pclass == i & train$price == 0), "price"] <- m
+}
+
+# ggplot(train, aes(as.character(family.size), price)) + geom_boxplot()
+```
+
+Until this point, there is no dependence of ticket fare or price. But the variable "price" is actually dependent on \textit{Pclass}, and this happens in practice when you have to pay more to get the best service. 
+
+
+# Variable Selection:
+After cleaning data, we will split train into 2 files: train.mod and valid.mod, to train and test the model. 
+
+```{r}
+library(caret)
+set.seed(3456)
+train <- train %>% select(-c("PassengerId", "Name", "mean.fare", "Cabin", "n", "Ticket")) 
+train <- train[,-1]
+
+trainIndex <- createDataPartition(train$Survived, p = .7,
+                                  list = FALSE,
+                                  times = 1)
+train.mod <- train[trainIndex,]
+valid.mod <- train[-trainIndex,]
+```
+
+```{r, echo= FALSE}
+library(SignifReg)
+null.model <- glm(Survived ~ 1, family = binomial, data = train.mod)
+full.model <- glm(Survived ~. , family = binomial, data = train.mod)
+scope = list(lower = formula(null.model), upper = formula(full.model))
+var.sel <- step(null.model, scope = scope, scale = 0, trace = 0, direction = "both")
+var.sel$formula
+```
+Forward selection suggest the model including \textit{Title, Pclass, family.size, Age, Fare, price, Embarked} as predictors. This model produced the AIC of 752.1, which is the same AIC as the smaller model with \textit{Title, Pclass, family.size, Age, Fare, price}. Therefore, I will drop \textit{Embarked} out of my model.
+
+```{r}
+keep <- c("Survived","Title", "Pclass", "family.size", "Age", "Fare", "price")
+```
+
+
+
+```{r, echo = F}
+test <- test.org
+# Title feature:
+
+test["Title"] <- str_split_fixed(test$Name, ", ", n = 2)[,2]
+test["Title"] <- str_split_fixed(test$Title, ". ", n = 2)[, 1]
+test["Title"] <- gsub("Major", "Officer", test[,"Title"], fixed = T)
+test["Title"] <- gsub("Capt", "Officer", test[,"Title"], fixed = T)
+test["Title"] <- gsub("Col", "Officer", test[,"Title"], fixed = T)
+test["Title"] <- gsub("Rev", "Officer", test[,"Title"], fixed = T)
+test["Title"] <- gsub("Don", "Officer", test[,"Title"], fixed = T)
+test["Title"] <- gsub("Mme", "Miss", test[,"Title"], fixed = T)
+test["Title"] <- gsub("Mlle", "Miss", test[,"Title"], fixed = T)
+test["Title"] <- gsub("th", "Miss", test[,"Title"], fixed = T)
+test["Title"] <- gsub("Jonkheer", "Mr", test[,"Title"], fixed = T)
+test["Title"] <- gsub("Ms", "Miss", test[,"Title"], fixed = T)
+test["Title"] <- gsub("Ms", "Miss", test[,"Title"], fixed = T)
+test["Title"] <- gsub("Ms", "Mrs", test[,"Title"], fixed = T)
+test["Title"] <- gsub("Lady", "Mrs", test[,"Title"], fixed = T)
+test["Title"] <- gsub("Sir", "Mr", test[,"Title"], fixed = T)
+unique(test$Title)
+#This title is only in test set:
+test["Title"] <- gsub("Officera", "Officer", test[,"Title"], fixed = T)
+unique(test$Title)
+
+test$Fare <- as.numeric(test$Fare)
+test$Age <- as.integer(test$Age)
+
+#age.missing.test <- test[is.na(test$Age), ] 
+#ggplot(age.missing.test, aes(Pclass, Sex)) + geom_jitter()
+#m.test <- mean(test[which(test$Pclass == 3), "Age"], na.rm =  T)
+test$Age <- replace_na(test$Age, mean(test$Age, na.rm = T))
+
+test <- test %>% mutate(family.size = SibSp + Parch  +  1 )
+test <- test %>% group_by(Ticket) %>% add_count() %>% mutate(mean.fare = mean(Fare))
+
+test <- test %>% mutate(price = Fare / n )
+for (i in 1:3){
+  m <- mean(test[which(test$Pclass == i & test$price != 0), "price"]$price, na.rm = T)
+  test[which(test$Pclass == i & test$price == 0), "price"] <- m
+}
+
+```
+
+
+
+# Models:
+```{r}
+train.mod <- train.mod[, keep]
+valid.mod <- valid.mod[, keep]
+keep.test <- keep[-1]
+test.mod <- test[, keep.test]
+```
+
+## 1. Logistic Model:
+```{r, echo = F}
+mod.reg <- glm(Survived ~., data = train.mod, family = binomial)
+mod.fit <- as.numeric(fitted(mod.reg) >  0.5)
+fit.tab <- xtabs(~ train.mod$Survived + mod.fit)
+reg.acc.fit  <- (fit.tab[1,1] + fit.tab[2,2]) / sum(fit.tab)
+summary(mod.reg)
+```
+
+## 2. Decision Tree:
+- Decision Tree is a supervised learning method.
+- Decision Tree is a graph to represent choices and their results in a form of a tree. 
+
+```{r, echo = F, message= F, warning= FALSE}
+library(rpart)
+library(rattle)
+library(rpart.plot)
+tree <- rpart(Survived ~., data = train.mod, method = "class")
+fancyRpartPlot(tree)
+```
+
+```{r}
+tree.fit <- predict(tree, train.mod, type = "class")
+tree.tab.fit <- table(train.mod$Survived, tree.fit)
+tree.acc.fit <- sum(diag(tree.tab.fit)) / sum(tree.tab.fit)
+```
+
+
+## 3. Random Forest:
+- Random forest creates several random Decision Tree output is the aggregate of those trees. 
+
+```{r, echo=FALSE, message= F, warning= FALSE}
+library(randomForest)
+set.seed(456)
+fit.acc <- c()
+x  <- c()
+for (i in  seq(5, 50, by = 2)){
+  rf <- randomForest(as.factor(Survived) ~., data = train.mod, ntree = i)
+  conf.matrix <- rf$confusion
+  fit.acc <- c(fit.acc,  sum(diag(conf.matrix)) / sum(conf.matrix))
+  x <- c(x, i)
+}
+
+plot(x, fit.acc)
+num.tree <- x[which.max(fit.acc)]
+```
+
+
+
+```{r}
+rf <- randomForest(as.factor(Survived) ~., data = train.mod, ntree = num.tree)
+rf.acc.fit <- sum(diag(rf$confusion)) / sum(rf$confusion)
+```
+
+
+## SVM:
+- SVM (Support Vector Machine) is a supervised learning methods, which used to classified data. 
+- Figure in wiki
+
+```{r}
+library(e1071)
+
+svm.mod <- svm(as.factor(Survived) ~., data = train.mod, scale =  F)
+svm.tab <- table(as.character(train.mod$Survived), svm.mod$fitted)
+svm.fit.acc <- sum(diag(svm.tab)) / sum(svm.tab)
+
+#make prediction:
+
+```
+
+
+## Comparsions: 
+Now, we will make comparision using the validation sets that we created above
+```{r, echo = F}
+library(xtable)
+library(kableExtra)
+
+reg.pred <-  as.numeric(predict(mod.reg, valid.mod) > 0.5)
+reg.tab.pred <- xtabs(~ valid.mod$Survived + reg.pred)
+reg.acc.pred  <- (reg.tab.pred [1,1] + reg.tab.pred [2,2]) / sum(reg.tab.pred)
+
+
+tree.pred <- predict(tree, valid.mod, type = "class")
+tree.tab.pred <- xtabs(~ valid.mod$Survived + tree.pred)
+tree.acc.pred  <- (tree.tab.pred [1,1] + tree.tab.pred [2,2]) / sum(tree.tab.pred)
+
+rf.pred <- predict(rf, valid.mod)
+rf.tab.pred <- xtabs(~ valid.mod$Survived + rf.pred)
+rf.acc.pred <- (rf.tab.pred [1,1] + rf.tab.pred [2,2]) / sum(rf.tab.pred)
+
+#svm.pred <- predict(svm.mod, valid.mod)
+r <- data.frame(logistic = c(reg.acc.fit, reg.acc.pred), 
+                tree = c(tree.acc.fit, tree.acc.pred),
+                random.forest = c(rf.acc.fit, rf.acc.pred))
+
+rownames(r) <- c("Fit accuarcy", "Prediction accuracy")
+kable(r, align = "c", "latex", booktabs=T, escape = F) %>% 
+  kable_styling(latex_options = "HOLD_position", position = "left") %>%
+  row_spec(1, hline_after = T) %>%
+  add_header_above(c(" ", "Summary results" = 2, ""), bold =  T, italic = T)
+
+```
+
+
+```{r}
+# Fit data for test file and submit:
+reg.pred <-  as.numeric(predict(mod.reg, test.mod) > 0.5)
+myresult <- data.frame(PassengerId = test$PassengerId, Survived = reg.pred)
+
+write.csv(x=myresult, file="myresult", row.names = F)
+
+
+```
+
+
+# Interpretation of Losgistic model:
+## Summarizing Predictive Power:
+

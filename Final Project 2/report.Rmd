@@ -1,0 +1,479 @@
+---
+title: "STA 5224: Final Project - Titanic Dataset"
+author: "Huong Tran"
+output:
+  bookdown::pdf_document2: default
+  pdf_document: default
+  bookdown::html_document2: default
+citation_package: biblatex
+---
+```{r setup, echo = F, warning= F, message=FALSE}
+knitr::opts_chunk$set(warning = F, message = F)
+```
+
+# I. Project Proposal: 
+This project is a competition on Kaggle with target of predicting which passengers survived the Titanic shipwreck by machine learning. Part 1 of the project will focus on cleaning data and obtaining some insights about data, together with variable selection process to create a meaningful dataset that can be used. Model application will be in the second part. Besides the statistical approach in logistic models, other machines learning model will be used. A typical model for supervised learning is decision tree, which is a series of sequential decisions represented as a tree to get a specific result. However, decision tree are prone to overfitting, especially when the tree is deep and random forest is a solution for this kind of problem. In general, a random forests model will creates several random decision trees and aggregate their result. Also, SVM works well with classification and regression, therefore it is good to represent SVM.  Finally, the comparision between these models will be derived. In the last section, statistical inference and interpretation from logistic models will be discussed. 
+
+\newpage
+
+# EDA (Exploratory Data Analysis):
+```{r echo= F, message = F, warning= FALSE}
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(ggplot2)
+library(gmodels)
+library(vcd)
+library(caret)
+library(xtable)
+library(kableExtra)
+
+test.org <- read.csv2(
+  "/Users/huongtran/OU /Course Work/SES 4/STA5224/Final Project 2/data/test.csv", 
+  header = T, sep = ",")
+survive <- read.csv(
+  "/Users/huongtran/OU /Course Work/SES 4/STA5224/Final Project 2/data/gender_submission.csv")
+train.org <- read.csv2(
+  "/Users/huongtran/OU /Course Work/SES 4/STA5224/Final Project 2/data/train.csv", 
+  header = T, sep = ",")
+train <- train.org
+```
+## Overview about Titanic Dataset:
+
+The data is obtained from the Titanic competition from [Kaggle](https://www.kaggle.com/c/titanic). Train dataset is provided with labels, from which we build our model to predict if a person would survive through the disaster. Kaggle will evaluate model performance using Test dataset. 
+
+![Train dataset](/Users/huongtran/OU /Course Work/SES 4/STA5224/Final Project 2/figure/train.png)
+
+There are 11 independent variables helping predict "Survived" variable, which take value of 1 as the passenger survived throught the disaster. Dictionary of these variables can be found through [Kaggle](https://www.kaggle.com/c/titanic). 
+
+```{r MissingValue, echo = F, fig.pos= "H"}
+Empty.train <- c()
+Empty.test  <- c()
+for (i in colnames(train.org)[-2]){
+  Empty.train <- c(Empty.train, sum(train.org[,i] == ""))
+  Empty.test <- c(Empty.test, sum(test.org[,i] == ""))
+  
+}
+
+mysummary <- data.frame(NA.train = colSums(is.na(train.org[, - 2])), Empty.train) %>%
+  mutate(Percent.train = round( (NA.train + Empty.train) / nrow(train.org)*100, 2)) %>%
+  cbind(data.frame(NA.test = colSums(is.na(test.org)), Empty.test = Empty.test)) %>% 
+  mutate(Percent.test = round( (NA.test + Empty.test) / nrow(test.org)*100, 2))
+
+knitr::kable(mysummary, caption = "Summary of missing values.") %>% kable_styling(latex_options = "HOLD_position")
+```
+
+From table \@ref(tab:MissingValue), \textit{Cabin} variables has  $77\%$ missing value in train set and  $78.23\%$ in test set, therefore we will drop this variable after exploration. 
+
+
+## Some insights about variable \textit{Name}:
+From \@ref(tab:MissingValue), \textit{Name} does not contain any missing and 891 unique values, which is not very informative. However, this variable having information about title of person, which indicates their social class and profession. At first, there are 17 unique titles as in table \@ref(tab:Title-tab) and many of them represents for the same levels:
+
+- The \textit{Title} relating to army and "Rev" are less likely to survive and they are male, to increase the degreee of freedom for error term, we can merge this title as "Official" level. 
+
+- \textit{Title} "Mme", "Mlle", "th", "Lady", "Ms" represent unmarried women, we change them into "Miss". 
+
+- "Jonkheer" will be changed into "Mr". 
+
+- The only one value of "Lady" and "Sir" are spouse, we will change their title into "Mrs" and "Mr". 
+
+```{r echo= F}
+train["Title"] <- str_split_fixed(train$Name, ", ", n = 2)[,2]
+train["Title"] <- str_split_fixed(train$Title, ". ", n = 2)[, 1]
+t <- train %>% group_by(Title) %>% summarize(count=n())
+```
+
+
+```{r, echo = F}
+train["Title"] <- gsub("Major", "Officer", train[,"Title"], fixed = T)
+train["Title"] <- gsub("Capt", "Officer", train[,"Title"], fixed = T)
+train["Title"] <- gsub("Col", "Officer", train[,"Title"], fixed = T)
+train["Title"] <- gsub("Rev", "Officer", train[,"Title"], fixed = T)
+train["Title"] <- gsub("Don", "Officer", train[,"Title"], fixed = T)
+train["Title"] <- gsub("Mme", "Miss", train[,"Title"], fixed = T)
+train["Title"] <- gsub("Mlle", "Miss", train[,"Title"], fixed = T)
+train["Title"] <- gsub("th", "Miss", train[,"Title"], fixed = T)
+train["Title"] <- gsub("Jonkheer", "Mr", train[,"Title"], fixed = T)
+train["Title"] <- gsub("Ms", "Miss", train[,"Title"], fixed = T)
+train["Title"] <- gsub("Ms", "Miss", train[,"Title"], fixed = T)
+train["Title"] <- gsub("Ms", "Mrs", train[,"Title"], fixed = T)
+train["Title"] <- gsub("Lady", "Mrs", train[,"Title"], fixed = T)
+train["Title"] <- gsub("Sir", "Mr", train[,"Title"], fixed = T)
+```
+
+From figure \@ref(fig:TitlePlot), the cleaning process help reduce the number of different levels in \textit{Title} variable to 6. "Mr" and "Officer" has the least chance of survival while "Miss" has the highest chance of survival. 
+
+Finally, this variable also contains information about \textit{Sex}. For example, a person with "Mr" value in "Title" should be a male. 
+
+## Age: 
+Recall from table \@ref(tab:MissingValue), variable \textit{Age} has 177 missing value in train dataset, which accounts for $19.87\%$ of total observation. Also, in test dataset, there are 86 missing value.  
+```{r, echo = F}
+train$Age <- as.numeric(train$Age)
+age.missing <- train[is.na(train$Age), ]
+```
+
+Figure \@ref(fig:AgeMissing) shows that the majority of missing value distributed mostly in social class \textit{Pclass = 3}, with \textit{Title} "Mrs", "Mr" and "Miss". From that, missing value can be imputed by the mean of \textit{Age} of this group.Imp 
+
+```{r, echo = F}
+m <- mean(train[which(train$Title %in% c("Mr", "Mrs", "Miss") & train$Pclass == 3), "Age"], na.rm =  T)
+train$Age <- replace_na(train$Age, m)
+```
+
+In figure \@ref(fig:AgeSurvival), $50\%$ of survival male in middle class was less than 10 years old. Also, more than 50-year-old man is the least likely to survive through the disaster. This suggests a way to divide age into 3 smaller groups: young, middle.age and old stored in variable \textit{Age.char}.
+```{r, echo = F}
+train <- train %>% mutate(Age.char = case_when(Age < 15 ~ "young", 
+                              Age < 50 ~ "middle.age",
+                              Age < 100 ~ "old"))
+```
+
+People in the first class has the highest chance to survive, especially when they are in middle age group. In contrast, middle-age men is the most likely died in the disaster. And in fact, the young in second group will survive. 
+
+
+## Information about Family size and total Ticket price of each family:
+At first, both variable \textit{SibSp} and \textit{Parch} contain information about family size, we can create a new variable as \textit{family.size} to obtain information about passenger's family.
+
+Boxplot \@ref(fig:Family-Fare) shows a positive trend of $\ln(\textit{Fare})$ and size of family, i.e, the large family size, the more fare that a ticket they paid. It seems that family members had the same ticket number would have the the same Fare. To get rid of the correlation, we will find the ticket price that each person had to pay by dividing \textit{Fare} for number of family member. Also, since there is some missing value in \textit{Fare}, this will imply tickets cost 0, which is impossible. In fact, the higher of socical class, the more expensive ticket, it is reasonable to impute missing value of \textit{Price} by the mean based on \textit{Pclass}. 
+
+```{r, echo = F}
+train <- train %>% mutate(family.size = SibSp + Parch  +  1 )
+train$Fare <- as.numeric(train$Fare)
+train <- train %>% mutate(price = Fare / family.size )
+for (i in 1:3){
+  m <- mean(train[which(train$Pclass == i & train$price != 0), "price"])
+  train[which(train$Pclass == i & train$price == 0), "price"] <- m
+}
+```
+
+
+
+
+## What can Ticket class and Embarkation tell us?
+Mosaic plot \@ref(fig:PclassPlot) shows that a women of upper class has the highest chance of survival while a men the the Lower class the lowest chance of survival. Also, although the total number of male is three times the total number of female, but male has the lower probability of survival. In fact, when the disaster hit, women and children were the first priority  to go to the rescue  boat. 
+
+
+\textit{Embarked} has 2 missing values, from tabel \@ref(tab:MissingValue) in the train set. The people of these two missing value have same information, but different name.  In fact, this cabin belongs to Mrs. George Nelson, and Miss Amelie is her maid. Since these missing values are from cabin B28, other variables in deck B can be used for imputation. 
+```{r ,echo=FALSE}
+B <- train[grep("B", train$Cabin),]
+```
+In general, result of [cross table](tableB) shows that passenger with Cabin in deck B used Cherbourg (C) and Southampton (S) as their embarkation. The percentage of survival of port Cherbourg (C) is higher, therefore, we can impute the missing data above by C.
+
+```{r}
+ train$Embarked[train$Embarked == ""] <- "C"
+```
+
+
+Figure \@ref(fig:Embarked) shows that the majority of passenger used Southampton (S) to embark. However, only lower class (Pclass == 3) used Queenstown (Q).
+
+
+# Model Fitting:
+## Variable Selection:
+After cleaning data, we will split train into 2 files: \textit{train.mod} and \textit{valid.mod} using function \begin{verbatim}createDataPartition() \end{verbatim} from \begin{verbatim}caret \end{verbatim} package, to for evaluate our model before applying it to give prediction on Test dataset. 
+
+```{r, echo = F}
+library(caret)
+set.seed(3456)
+train <- train %>% select(-c("PassengerId", "Name", "Cabin", "Ticket")) 
+
+
+trainIndex <- createDataPartition(train$Survived, p = .8,
+                                  list = FALSE,
+                                  times = 1)
+train.mod <- train[trainIndex,]
+valid.mod <- train[-trainIndex,]
+cat("Number of observation in train.mod is: ", nrow(train.mod), "\n ", 
+    "Number of observation in test.mod is: ", nrow(valid.mod))
+
+```
+
+
+
+Forward selection below suggests the model including \textit{Title, Pclass, family.size, Age, Fare, price, Sex} as predictors. This model produced the AIC of 614.4. However, as discussed above, \textit{Title} variable already includes information about \textit{Sex} and there is no need to use this variable as predictors. Also, to avoid the collinearity of \textit{Fare}, this variable should be replace by \textit{price}. In conclusion, our model will use \textit{Title, Pclass, family.size, Age, price}.
+
+```{r, echo= FALSE, message = F, warning = F}
+library(SignifReg)
+null.model <- glm(Survived ~ 1, family = binomial, data = train.mod)
+full.model <- glm(Survived ~. , family = binomial, data = train.mod)
+scope = list(lower = formula(null.model), upper = formula(full.model))
+var.sel <- step(null.model, scope = scope, scale = 0, trace = 0, direction = "both")
+var.sel$formula
+```
+
+```{r, echo= FALSE}
+keep <- c("Survived","Title", "Pclass", "family.size", "Age", "Fare", "price")
+train.mod <- train.mod[, keep]
+valid.mod <- valid.mod[, keep]
+```
+
+## Logistic Regression:
+Logistic Regression will return result of numeric value, which represent for the probability that a person survived through the disaster. Therefore, choosing a cut point will help obtain classification as 1 for survived and 0 for not survived. A resonable cut point is the estimate probability of survival, calculated as:
+$$\hat{p} = \dfrac{\text{Total number of survival} }{\text{Total number of observation}} $$
+
+```{r, echo=F, warning = F, message = F}
+cut.point <- sum(train.mod$Survived) / nrow(train.mod)
+mod.reg <- glm(Survived ~ ., data = train.mod, family = binomial)
+mod.fit <- as.numeric(fitted(mod.reg) >=  cut.point)
+fit.tab <- xtabs(~ train.mod$Survived + mod.fit)
+reg.acc.fit  <- (fit.tab[1,1] + fit.tab[2,2]) / sum(fit.tab)
+cat("The fitted accuracy is: ", reg.acc.fit)
+```
+Logistic Reg- sression model provide AIC of 614.87 and the fitted accuracy is 82.04$\%%. 
+
+## Decision Tree:
+Decision Tree is a supervised learning method, which uses a graph to represent choices and their results in a form of a tree. Figure \@ref(fig:tree) illustrates how the tree looks like when model is fitted. \textit{Title} is the most important factor, if a passenger has title of "Dr", "Mr", "Officer", there is $60\%$ of chance that they could not survive. In constrast, smaller value of \text{Pclass} has higher probability of survive, since they were in first class, and obviously were helped to escape from the ship when disaster hit. The fitted accuracy of decision tree is about  84.57$\%$, which is higher than logistic regression. 
+
+```{r, echo = F, message= F, warning= FALSE}
+library(rpart)
+library(rattle)
+library(rpart.plot)
+tree <- rpart(Survived ~., data = train.mod, method = "class")
+```
+
+```{r, echo = F, message= F, warning= FALSE}
+tree.fit <- predict(tree, train.mod, type = "class")
+tree.tab.fit <- table(train.mod$Survived, tree.fit)
+tree.acc.fit <- sum(diag(tree.tab.fit)) / sum(tree.tab.fit)
+cat("Fitted accuracy for Decision Tree is: ", tree.acc.fit)
+```
+
+## Random Forest:
+Random forest is a supervised learning which creates several random Decision Tree and output is the aggregate of those trees. To make the algorithm stable, we will create several forest with the same number of trees, final result is taken using the mean of these forests. 
+
+In figure \@ref(fig:bestforest), fitted accuracy increase as number of tree increase, accuracy peaks when ntree = 45, but it never exceed 82$\%$ of accuracy. 
+
+
+```{r, echo = F, warning=FALSE, message= FALSE}
+library(randomForest)
+set.seed(456)
+fit.acc <- c()
+ntree  <- c()
+forest <- c()
+#creat 10 forest of size ntree = i, and take the average of these
+for (i in  seq(5, 50, by = 1)){
+  temp <- c()
+  for (j in 1:50){
+    rf <- randomForest(as.factor(Survived) ~., data = train.mod, ntree = i)
+    conf.matrix <- rf$confusion
+    temp <- c(temp,  sum(diag(conf.matrix)) / sum(conf.matrix))
+    j <- j+1 
+  }
+  #take average of all size i trees
+  fit.acc <- c(fit.acc, mean(temp))
+  ntree <- c(ntree, i)
+}
+num.tree <- ntree[which.max(fit.acc)]
+```
+
+```{r, echo=F, warning=F, messing = F}
+rf <- randomForest(as.factor(Survived) ~., data = train.mod, ntree = num.tree)
+rf.acc.fit <- sum(diag(rf$confusion)) / sum(rf$confusion)
+cat("Fitted accuracy of random forest is: ", rf.acc.fit)
+```
+
+## SVM (Support Vector Machine):
+SVM (Support Vector Machine) is a supervised learning methods, which used to classified data. In general, it creates a hyperplane to separate train data into 2 classes, which are labled, in our dataset, those lables are 0 and 1. The goal is to decide which class a new data point will be in.
+Fitting train data into SVM model, we obtain the fitted accuracy is: 90$\%$, which much higher that previous methods. 
+
+
+```{r, echo = F, message= F, warning= F}
+library(e1071)
+svm.mod <- svm(as.factor(Survived) ~., data = train.mod, scale =  F)
+svm.tab <- table(as.character(train.mod$Survived), svm.mod$fitted)
+svm.acc.fit <- sum(diag(svm.tab)) / sum(svm.tab)
+cat("Fitted accuracy of SVM is: ", svm.acc.fit)
+```
+
+## Model comparision:
+Model comparsion should be based on new data. Fitting new data from \textit{valid.mod} dataframe can result a more objective comparison between our models.
+In table \@ref(tab:comparison), although fitted accuracy of SVM is highest, but this algorithm does not work well with new data. It seems that Decision Tree is the best algorithm, which provides the highest accuracy, 86$\%$ of correct prediction. 
+
+```{r comparison, echo = F, warning=FALSE, message= FALSE}
+library(xtable)
+library(kableExtra)
+
+reg.pred <-  as.numeric(predict(mod.reg, valid.mod) > 0.5)
+reg.tab.pred <- xtabs(~ valid.mod$Survived + reg.pred)
+reg.acc.pred  <- (reg.tab.pred [1,1] + reg.tab.pred [2,2]) / sum(reg.tab.pred)
+
+
+tree.pred <- predict(tree, valid.mod, type = "class")
+tree.tab.pred <- xtabs(~ valid.mod$Survived + tree.pred)
+tree.acc.pred  <- (tree.tab.pred [1,1] + tree.tab.pred [2,2]) / sum(tree.tab.pred)
+
+rf.pred <- predict(rf, valid.mod)
+rf.tab.pred <- xtabs(~ valid.mod$Survived + rf.pred)
+rf.acc.pred <- (rf.tab.pred [1,1] + rf.tab.pred [2,2]) / sum(rf.tab.pred)
+
+svm.pred <- predict(svm.mod, valid.mod, decision.values = FALSE)
+svm.tab.pred <- rf.tab.pred <- xtabs(~ valid.mod$Survived + svm.pred)
+svm.acc.pred <- (svm.tab.pred [1,1] + svm.tab.pred [2,2]) / sum(svm.tab.pred)
+
+
+#svm.pred <- predict(svm.mod, valid.mod)
+r <- data.frame(logistic = c(reg.acc.fit, reg.acc.pred), 
+                tree = c(tree.acc.fit, tree.acc.pred),
+                random.forest = c(rf.acc.fit, rf.acc.pred),
+                svm.mod  = c(svm.acc.fit, svm.acc.pred))
+
+rownames(r) <- c("Fit accuarcy", "Prediction accuracy")
+kable(r, align = "c", "latex", booktabs=T, escape = F, caption = "Accuracy for valid.mod dataframe") %>% 
+  kable_styling(latex_options = "HOLD_position", position = "left") %>%
+  row_spec(1, hline_after = T) %>%
+  add_header_above(c(" ", "Summary results" = 2, ""), bold =  T, italic = T)
+```
+
+
+# Interpretation of Losgistic Regresion:
+Recall logistic regression model:
+```{r, echo = F}
+summary(mod.reg)
+```
+
+Using cutpoint at $$\hat{p} = 0.38$$ logistic regression provide overall proportion of correct classification is $82.04\%$. Figure \@ref(fig:ROC-curve) shows AUC is 0.8696. 
+
+```{r, echo=FALSE, message = F, warning=FALSE}
+suppressMessages(library(pROC))
+suppressMessages(
+  rocPlot <- roc(Survived ~ fitted(mod.reg), data = train.mod)
+)
+cat("AUC of logistic regression is: ", auc(rocPlot))
+```
+
+
+\textbf{Restriction of Logistic Regression: } 
+- Since the choice of cut point is arbitrary, the result are sensitive to relative numbers of times that $y = 1$ and $y = 0$.
+
+- Also, it collapses continuous predictive value $\hat{p}$ into binary ones. For example, predictive value of 0.37999 will result 0, which is not very convincible. 
+
+# Make prediction on test dataset and submit to Kaggle:
+Besides cleaning test dataset with the procedure that we cleaned train dataset, table \@ref(tab:MissingValue) also say that there is 1 missing value in variable \textit{Fare}, therefore, after calculating the ticket price, we can fill in this missing value by the following fomula:
+$$\text{Fare} = \text{price} \times \text{family.size} $$
+As discuss above, SVM does not seem to work well in newdata, therefore we will just make prediction for test dataset, using Logistic Regression and Decision Tree. 
+
+```{r test, echo=F, message=FALSE, warning=FALSE}
+test <- test.org
+# Title feature:
+
+test["Title"] <- str_split_fixed(test$Name, ", ", n = 2)[,2]
+test["Title"] <- str_split_fixed(test$Title, ". ", n = 2)[, 1]
+test["Title"] <- gsub("Major", "Officer", test[,"Title"], fixed = T)
+test["Title"] <- gsub("Capt", "Officer", test[,"Title"], fixed = T)
+test["Title"] <- gsub("Col", "Officer", test[,"Title"], fixed = T)
+test["Title"] <- gsub("Rev", "Officer", test[,"Title"], fixed = T)
+test["Title"] <- gsub("Don", "Officer", test[,"Title"], fixed = T)
+test["Title"] <- gsub("Mme", "Miss", test[,"Title"], fixed = T)
+test["Title"] <- gsub("Mlle", "Miss", test[,"Title"], fixed = T)
+test["Title"] <- gsub("th", "Miss", test[,"Title"], fixed = T)
+test["Title"] <- gsub("Jonkheer", "Mr", test[,"Title"], fixed = T)
+test["Title"] <- gsub("Ms", "Miss", test[,"Title"], fixed = T)
+test["Title"] <- gsub("Ms", "Miss", test[,"Title"], fixed = T)
+test["Title"] <- gsub("Ms", "Mrs", test[,"Title"], fixed = T)
+test["Title"] <- gsub("Lady", "Mrs", test[,"Title"], fixed = T)
+test["Title"] <- gsub("Sir", "Mr", test[,"Title"], fixed = T)
+
+#This title is only in test set:
+test["Title"] <- gsub("Officera", "Officer", test[,"Title"], fixed = T)
+test$Fare <- as.numeric(test$Fare)
+test$Age <- as.numeric(test$Age)
+m.test <- mean(test[which(test$Title %in% c("Mr", "Mrs", "Miss") & test$Pclass == 3), "Age"], na.rm =  T)
+test$Age <- replace_na(test$Age, m.test)
+test <- test %>% mutate(family.size = SibSp + Parch  +  1 ) %>%
+  mutate(price = Fare / family.size )
+for (i in 1:3){
+  m <- mean(test[which(test$Pclass == i & test$price != 0), "price"], na.rm = T)
+  test[which(test$Pclass == i & test$price == 0), "price"] <- m
+  test$price <- replace_na(test$price, m)
+}
+
+#find the missing position of test$Fare:
+pos <- which(is.na(test$Fare) == T)
+test$Fare[pos] <- test$family.size[pos] * test$price[pos]
+
+keep.test <- keep[-1]
+test.mod <- test[, keep.test]
+
+```
+
+
+```{r test.predict, echo=F}
+reg.test <-  as.numeric(predict(mod.reg, test.mod) > cut.point)
+reg.test <- data.frame(PassengerId = test$PassengerId, Survived = reg.test)
+
+tree.test <- predict(tree, test.mod, type = "class")
+tree.test <- data.frame(PassengerId = test$PassengerId, Survived = tree.test)
+
+write.csv(x=reg.test, file="reg.result", row.names = F)
+write.csv(x=tree.test, file="tree.result", row.names = F)
+```
+ 
+Kaggle returns the score for our submission at 77.9$\%$ for Logistic Regression and 77.4$\%$ for Decision Tree, which is not very different between the two models. 
+
+# Further question for improvement:
+1. In variable selection, we used least square regression model. In fact, variables in our data are correlated, as mentioned above and Ridge regression is expected to give better performance when handling collinearity. 
+
+2. We used mean to impute missing value for \textit{Age} based on their age group. In fact, regression on \textit{Age} using other variables can be applied and hopefully will bring better results. 
+
+3. In our logistic model, we did not consider the interaction of predictors. However, as we have seen above, \textit{Title} "Master" in the first class has more chance to survive than the lower class. Therefore, interaction of some variables should be taken into account. 
+
+\newpage
+# Appendix: Figures and Code 
+
+```{r Title-tab, echo=FALSE}
+knitr::kable(t, caption = "Count of unique Title.") %>% kable_styling(latex_options = "HOLD_position")
+```
+
+
+```{r TitlePlot, fig.cap="Title and Survival.", echo=FALSE}
+df.title <- as.data.frame(table(train$Survived, train$Title))
+ggplot(df.title, aes(x = Var2, y = Freq, fill = Var1)) + geom_col(position = "fill") 
+```
+
+```{r AgeMissing, fig.cap="Relationship between Age and Title and Pclass", echo = F}
+ggplot(age.missing, aes(Title, as.factor(Pclass))) + geom_jitter()
+```
+
+```{r AgeSurvival, fig.cap="Boxplot of Age, by Pclass, Sex, Survival.", echo = F }
+ggplot(train, aes(as.factor(Pclass), Age, fill = Sex)) + geom_boxplot() + facet_grid(cols = vars(Survived))
+```
+
+
+```{r Family-Fare, fig.cap="Family Size and Ticket Fare", echo = F}
+ggplot(train, aes(as.character(family.size), log(Fare))) + geom_boxplot()
+```
+
+
+```{r PclassPlot, fig.cap="Pclass and Sex affect Survival.", echo=FALSE}
+mosaic(~ Sex + Pclass + Survived, data = train,
+       gp = shading_Friendly, legend= T )
+```
+
+
+```{r Embarked, fig.cap="Relation of Passerger class and Port of Embarktionin their survial chance.", echo=FALSE}
+ggplot(train, aes(Survived, Pclass, colour = Embarked)) + geom_jitter() 
+```
+
+```{r tableB, echo = F}
+CrossTable(B$Survived, B$Embarked, prop.c = T, prop.r = F, prop.t = F, prop.chisq = F)
+```
+
+```{r tree, fig.cap="Decision Tree.", echo=FALSE}
+fancyRpartPlot(tree)
+```
+
+```{r bestforest, fig.cap= "Accuracy based on number of tree in each forest", echo = F}
+plot(ntree, fit.acc)
+```
+
+
+```{r ROC-curve, fig.cap= "ROC curve of Logistic Regression.", echo = F}
+x <- data.frame(rocPlot$sensitivities,rocPlot$specificities, rocPlot$thresholds)
+thePar <- par(pty = "s")
+plot.roc(rocPlot, legacy.axes = TRUE, asp = F)
+```
+
+\newpage
+
+\begin{thebibliography}{9}
+	\bibitem{1} Categorical Data Analysis, Third Edition, Alan Agresti.
+	\bibitem{2} An introduction to Categorical Data Analysis, Third Edition, Alan Agresti.
+	\bibitem{IntroML} Machine Learning Algorithms -A Review, Batta Mahesh
+\end{thebibliography} 
